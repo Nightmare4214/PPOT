@@ -27,6 +27,11 @@ Office-31:
 python train.py --task office31 -s amazon -t dslr --lr 0.0002 --balanced --no-ssl
 ```
 
+batch=60  
+best H-score = 88.9  
+best unknown accuracy = 94.7  
+best known accuracy = 83.8
+
 Office-Home:
 
 ```bash
@@ -41,7 +46,7 @@ python train.py --task VisDA2017 -s train -t validation --lr 0.0005 --balanced -
 
 ## Reference code
 
-https://github.com/facebookresearch/moco
+<https://github.com/facebookresearch/moco>
 
 ## Contact
 
