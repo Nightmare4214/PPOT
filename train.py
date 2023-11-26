@@ -30,7 +30,9 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 def main(args: argparse.Namespace):
     # create logger
     now = time.strftime("%Y-%m-%d-%H_%M_%S", time.localtime(time.time()))
-    filename = os.path.join('log/', "{}2{}-{}.txt".format(args.source, args.target, now))
+    filename = os.path.join(
+        'log', "{}2{}-{}.txt".format(args.source, args.target, now))
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     logger = TextLogger(filename)
     sys.stdout = logger
     sys.stderr = logger
@@ -40,17 +42,17 @@ def main(args: argparse.Namespace):
         args.source_private_class = 10
         args.target_private_class = 11
         args.moco_k = 1024
-    if args.task == 'VisDA2017':
+    elif args.task == 'VisDA2017':
         args.common_class = 6
         args.source_private_class = 3
         args.target_private_class = 3
         args.moco_k = 65536
-    if args.task == 'officehome':
+    elif args.task == 'officehome':
         args.common_class = 10
         args.source_private_class = 5
         args.target_private_class = 50
         args.moco_k = 3072
-    if args.task == 'DomainNet':
+    elif args.task == 'DomainNet':
         args.batch_size = 256
         args.common_class = 150
         args.source_private_class = 50
@@ -81,39 +83,49 @@ def main(args: argparse.Namespace):
     ])
 
     # create data set
-    source_dataset = datasets.Datasets(args, source=True, transform=train_transform)
+    source_dataset = datasets.Datasets(
+        args, source=True, transform=train_transform)
     if args.balanced:
         source_label = source_dataset.create_label_set()
-        train_batch_sampler = BalancedBatchSampler(source_label, batch_size=args.batch_size)
-        source_loader = DataLoader(source_dataset, batch_sampler=train_batch_sampler, num_workers=args.num_workers)
+        train_batch_sampler = BalancedBatchSampler(
+            source_label, batch_size=args.batch_size)
+        source_loader = DataLoader(
+            source_dataset, batch_sampler=train_batch_sampler, num_workers=args.num_workers)
     else:
         source_loader = DataLoader(dataset=source_dataset, batch_size=args.source_batch_size, shuffle=True,
                                    num_workers=args.num_workers, drop_last=True)
 
-    target_dataset = datasets.Datasets(args, source=False, transform=train_transform)
+    target_dataset = datasets.Datasets(
+        args, source=False, transform=train_transform)
     target_loader = DataLoader(dataset=target_dataset, batch_size=args.batch_size, shuffle=True,
                                num_workers=args.num_workers, drop_last=True)
 
-    val_dataset = datasets.Datasets(args, source=False, transform=val_transform)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    val_dataset = datasets.Datasets(
+        args, source=False, transform=val_transform)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
+                            shuffle=False, num_workers=args.num_workers)
 
     # create model
     num_class = args.common_class + args.source_private_class
     if args.checkpoint:
-        model = Res50(num_class=num_class, checkpoint=args.checkpoint).to(device)
+        model = Res50(num_class=num_class,
+                      checkpoint=args.checkpoint).to(device)
         print("use checkpoint")
     elif args.no_ssl:
         model = Res50(num_class=num_class).to(device)
     else:
         train_moco(args)
         model = Res50(num_class=num_class,
-                      checkpoint='checkpoint/{}2{}_{:04d}.pth.tar'.format(args.source, args.target, args.moco_epochs)
+                      checkpoint='checkpoint/{}2{}_{:04d}.pth.tar'.format(
+                          args.source, args.target, args.moco_epochs)
                       ).to(device)
 
     # create optimizer
     all_parameters = model.get_parameters()
-    optimizer = SGD(all_parameters, args.lr, momentum=args.momentum, weight_decay=10 * args.weight_decay, nesterov=True)
-    lr_scheduler = LambdaLR(optimizer, lambda x: args.lr * (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
+    optimizer = SGD(all_parameters, args.lr, momentum=args.momentum,
+                    weight_decay=10 * args.weight_decay, nesterov=True)
+    lr_scheduler = LambdaLR(optimizer, lambda x: args.lr *
+                            (1. + args.lr_gamma * float(x)) ** (-args.lr_decay))
 
     # train source domain 1000 iterations to fine-tune the model
     batch_time = AverageMeter('Time', ':6.3f')
@@ -182,7 +194,7 @@ def main(args: argparse.Namespace):
 
     # init source prototypes, alpha, beta and class weight
     s_feat, s_label = get_features(source_loader, model)
-    s_protos = get_prototypes(s_feat, s_label, args)
+    s_protos = get_prototypes(s_feat, s_label, args)  # (L, 256)
     alpha = update_alpha(target_loader, model)
     beta = alpha
     class_weight = torch.ones(num_class)
@@ -241,71 +253,82 @@ def train(source_loader: DataLoader, target_loader: DataLoader, source_prototype
             target_data_iter = iter(target_loader)
             target_data = next(target_data_iter)
 
-        s_img, s_label = source_data
-        t_img, _ = target_data
+        s_img, s_label = source_data  # (B1, 3, 224, 224), (B1,)
+        t_img, _ = target_data  # (B2, 3, 224, 224)
         s_img, t_img = s_img.to(device), t_img.to(device)
         s_label = s_label.to(device)
-        class_weight = class_weight.to(device)
+        class_weight = class_weight.to(device)  # (L,)
         data_time.update(time.time() - end)
-        s_prediction, s_feature = model(s_img)
+        s_prediction, s_feature = model(s_img)  # (B1, L), (B1, 256)
         s_feature = F.normalize(s_feature, p=2, dim=-1)
-        _, t_feature = model(t_img)
-        
+        _, t_feature = model(t_img)  # (B2, 256)
+
         # freeze head parameters
         head = copy.deepcopy(model.head)
         for params in head.parameters():
             params.requires_grad = False
-        t_prediction = F.softmax(head(t_feature), dim=1)
-        conf, pred = t_prediction.max(dim=1)
+        t_prediction = F.softmax(head(t_feature), dim=1)  # (B2, L)
+        conf, pred = t_prediction.max(dim=1)  # (B2,)
         t_feature = F.normalize(t_feature, p=2, dim=-1)
         batch_size = t_feature.shape[0]
 
         # update alpha by moving average
-        alpha = (1 - args.alpha) * alpha + args.alpha * (conf >= args.tau1).sum().item() / conf.size(0)
+        alpha = (1 - args.alpha) * alpha + args.alpha * \
+            (conf >= args.tau1).sum().item() / conf.size(0)
 
         # get alpha / beta
         match = alpha / beta
 
         # update source prototype by moving average
-        source_prototype = source_prototype.data.to(device)
+        source_prototype = source_prototype.data.to(device)  # (L, 256)
         batch_source_prototype = torch.zeros_like(source_prototype).to(device)
         for i in range(num_classes):
             if (s_label == i).sum().item() > 0:
-                batch_source_prototype[i] = (s_feature[s_label == i].mean(dim=0))
+                batch_source_prototype[i] = (
+                    s_feature[s_label == i].mean(dim=0))
             else:
                 batch_source_prototype[i] = (source_prototype[i])
-        source_prototype = (1 - args.tau) * source_prototype + args.tau * batch_source_prototype
+        source_prototype = (1 - args.tau) * source_prototype + \
+            args.tau * batch_source_prototype
         source_prototype = F.normalize(source_prototype, p=2, dim=-1)
 
-        # get ot loss
+        # get ot loss a = alpha/beta (1/L, 1/L, ..., 1/L),    b = (1/B2, 1/B2, ..., 1/B2)
         a, b = match * ot.unif(num_classes), ot.unif(batch_size)
-        m = torch.cdist(source_prototype, t_feature) ** 2
+        m = torch.cdist(source_prototype, t_feature) ** 2  # (L, B2)
         m_max = m.max().detach()
         m = m / m_max
         pi, log = ot.partial.entropic_partial_wasserstein(a, b, m.detach().cpu().numpy(), reg=args.reg, m=alpha,
                                                           stopThr=1e-10, log=True)
-        pi = torch.from_numpy(pi).float().to(device)
+        pi = torch.from_numpy(pi).float().to(device)  # (L, B2)
         ot_loss = torch.sqrt(torch.sum(pi * m) * m_max)
         loss = args.ot * ot_loss
 
         # update class weight and target weight by plan pi
         plan = pi * batch_size
+
+        batch_class_weight = torch.tensor(
+            [plan[i, :].sum() for i in range(num_classes)]).to(device)
+        class_weight = args.tau * batch_class_weight + \
+            (1 - args.tau) * class_weight
+        class_weight = class_weight * num_classes / \
+            class_weight.sum()  # L/alpha *class_weight(L,)
+
         k = round(args.neg * batch_size)
-        min_dist, _ = torch.min(m, dim=0)
-        _, indicate = min_dist.topk(k=k, dim=0)
-        batch_class_weight = torch.tensor([plan[i, :].sum() for i in range(num_classes)]).to(device)
-        class_weight = args.tau * batch_class_weight + (1 - args.tau) * class_weight
-        class_weight = class_weight * num_classes / class_weight.sum()
-        k_weight = torch.tensor([plan[:, i].sum() for i in range(batch_size)]).to(device)
-        k_weight /= alpha
-        u_weight = torch.zeros(batch_size).to(device)
+        min_dist, _ = torch.min(m, dim=0)  # (B2,)
+        _, indicate = min_dist.topk(k=k, dim=0)  # (k,)
+        k_weight = torch.tensor([plan[:, i].sum()
+                                for i in range(batch_size)]).to(device)
+        k_weight /= alpha  # (B2,)
+        u_weight = torch.zeros(batch_size).to(device)  # (B2,)
         u_weight[indicate] = 1 - k_weight[indicate]
 
         # update beta
-        beta = args.beta * (class_weight > args.tau2).sum().item() / num_classes + (1 - args.beta) * beta
+        beta = args.beta * (class_weight > args.tau2).sum().item() / \
+            num_classes + (1 - args.beta) * beta
 
         # get classification loss
-        cls_loss = F.cross_entropy(s_prediction, s_label, weight=class_weight.float())
+        cls_loss = F.cross_entropy(
+            s_prediction, s_label, weight=class_weight.float())
         loss += cls_loss
 
         # get entropy loss
@@ -362,7 +385,8 @@ def validate(val_loader: DataLoader, model: Res50, epoch: int) -> [np.ndarray]:
             confidence, pred = output.max(dim=1)
             pred[confidence < args.threshold] = unknown_label
             correct = pred.eq(label).sum().item()
-            unknown_correct = pred[confidence < args.threshold].eq(label[confidence < args.threshold]).sum().item()
+            unknown_correct = pred[confidence < args.threshold].eq(
+                label[confidence < args.threshold]).sum().item()
             unknown_sample = (label == unknown_label).sum().item()
             total_correct += correct
             total_unknown_correct += unknown_correct
@@ -370,7 +394,8 @@ def validate(val_loader: DataLoader, model: Res50, epoch: int) -> [np.ndarray]:
             total_unknown_samples += unknown_sample
 
         # compute H-score and accuracy
-        known_acc = (total_correct - total_unknown_correct) / (total_samples - total_unknown_samples)
+        known_acc = (total_correct - total_unknown_correct) / \
+            (total_samples - total_unknown_samples)
         unknown_acc = total_unknown_correct / total_unknown_samples
         h_scores = h_score(known_acc, unknown_acc)
         data_time.update(time.time() - end)
@@ -382,6 +407,8 @@ def validate(val_loader: DataLoader, model: Res50, epoch: int) -> [np.ndarray]:
 
 
 def update_alpha(target_loader: DataLoader, model: Res50) -> np.ndarray:
+    # sum(max(softmax(h(f(x^t))), dim=1) >= tau1) / n
+
     num_conf, num_sample = 0, 0
     model.eval()
 
@@ -416,14 +443,15 @@ def get_features(data_loader: DataLoader, model: Res50) -> [torch.Tensor, torch.
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='PPOT for Universal Domain Adaptation')
-    parser.add_argument('--root', default='/path/to/your/dataset/',
+    parser = argparse.ArgumentParser(
+        description='PPOT for Universal Domain Adaptation')
+    parser.add_argument('--root', default='/home/icml007/Nightmare4214/datasets/office31',
                         help='root of data file')
-    parser.add_argument('--task', default='officehome',
+    parser.add_argument('--task', default='office31',
                         help='task name')
-    parser.add_argument('-s', '--source', default='Art',
+    parser.add_argument('-s', '--source', default='amazon',
                         help='source domain')
-    parser.add_argument('-t', '--target', default='Clipart',
+    parser.add_argument('-t', '--target', default='dslr',
                         help='target domain')
     parser.add_argument('--common-class', default=10, type=int,
                         help='number of common class')
@@ -435,7 +463,7 @@ if __name__ == '__main__':
                         help='mini-batch size')
     parser.add_argument('-n', '--num-workers', default=4, type=int,
                         help='number of data loading workers')
-    parser.add_argument('--lr', default=0.001, type=float,
+    parser.add_argument('--lr', default=0.0002, type=float,
                         help='initial learning rate')
     parser.add_argument('--momentum', default=0.9, type=float,
                         help='momentum')

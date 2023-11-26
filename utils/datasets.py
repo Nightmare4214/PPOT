@@ -15,14 +15,16 @@ class Datasets(datasets.VisionDataset):
         self.source_class = self.common_class + self.source_private_class
 
         # add '/' in the last of root if necessary
-        if self.root[-1] is not '/':
-            self.root += '/'
+        # if self.root[-1] is not '/':
+        #     self.root += '/'
 
         # create total root
         if source:
-            file_name = self.root + args.source + '.txt'
+            file_name = os.path.join(self.root, args.source + '.txt')
+            # file_name = self.root + args.source + '.txt'
         else:
-            file_name = self.root + args.target + '.txt'
+            file_name = os.path.join(self.root, args.target + '.txt')
+            # file_name = self.root + args.target + '.txt'
 
         self.samples = self.get_data_list(file_name, source=source)
 
@@ -39,7 +41,8 @@ class Datasets(datasets.VisionDataset):
         return len(self.samples)
 
     def create_label_set(self):
-        label = torch.tensor([self.samples[i][1] for i in range(len(self.samples))])
+        label = torch.tensor([self.samples[i][1]
+                             for i in range(len(self.samples))])
         return label
 
     def get_data_list(self, file_name, source=False):
@@ -48,7 +51,8 @@ class Datasets(datasets.VisionDataset):
             if source:
                 class_set = [i for i in range(self.source_class)]
             else:
-                class_set = [i for i in range(self.common_class)] + [self.source_class]
+                class_set = [i for i in range(
+                    self.common_class)] + [self.source_class]
             for line in f.readlines():
                 split_line = line.split()
                 target = int(split_line[-1])
@@ -64,5 +68,3 @@ class Datasets(datasets.VisionDataset):
                 if target in class_set:
                     data_list.append((path, target))
         return data_list
-
-

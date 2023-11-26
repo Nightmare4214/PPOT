@@ -28,17 +28,17 @@ class Res50(nn.Module):
                 del state_dict[k]
             self.model.load_state_dict(state_dict, strict=False)
         else:
-            self.model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+            self.model = models.resnet50(
+                weights=models.ResNet50_Weights.DEFAULT)
 
         out_dim = self.model.fc.in_features
 
-        self.bottleneck = nn.Sequential(
-            nn.Linear(out_dim, self.feat_dim),
-            nn.BatchNorm1d(self.feat_dim),
-            nn.ReLU()
-        )
-
         if self.is_bottle:
+            self.bottleneck = nn.Sequential(
+                nn.Linear(out_dim, self.feat_dim),
+                nn.BatchNorm1d(self.feat_dim),
+                nn.ReLU()
+            )
             self.head = nn.Linear(self.feat_dim, self.num_class)
         else:
             self.head = nn.Linear(2048, self.num_class)
@@ -89,5 +89,3 @@ class Res50(nn.Module):
             # delete renamed or unused k
             del state_dict[k]
         self.model.load_state_dict(state_dict, strict=False)
-
-
